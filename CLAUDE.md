@@ -1,4 +1,4 @@
-# АРГО / SARAP — Инструкция для Claude
+# SARAP — Инструкция для Claude
 
 > Этот файл создан для быстрого погружения в проект в начале каждой новой сессии.
 > Читай его полностью перед тем, как начать работу.
@@ -7,7 +7,7 @@
 
 ## Что это за проект
 
-**SARAP** (ранее АРГО) — корпоративная система мониторинга инцидентов и серверов для государственного органа (МТЗСН — Министерство труда и социальной защиты населения РК).
+**SARAP** — корпоративная система мониторинга инцидентов и серверов.
 
 - Frontend: `http://localhost:3000` (Next.js dev)
 - Backend API: `http://localhost:8081/api`
@@ -31,13 +31,15 @@ monitoring/
 ### Backend
 ```bash
 cd backend
-mvn spring-boot:run
+mvnw.cmd spring-boot:run      # Windows
+./mvnw spring-boot:run        # Linux/Mac
 # Слушает на :8081
 ```
 
 ### Frontend
 ```bash
 cd frontend
+npm install
 npm run dev
 # Слушает на :3000, API проксируется на :8081
 ```
@@ -50,7 +52,7 @@ npm run dev
 ### Production (всё в одном JAR)
 ```bash
 cd backend
-mvn clean package
+mvnw.cmd clean package        # Windows
 java -jar target/monitoring-0.0.1-SNAPSHOT.jar
 # frontend + API на :8081
 ```
@@ -129,8 +131,8 @@ const isAdmin = user?.roles?.some(r => ["ADMIN","SUPER_ADMIN"].includes(r.code ?
 
 #### Паттерн кнопок-действий
 ```tsx
-// Синяя градиентная кнопка — через inline style или custom CSS класс
-className="... bg-gradient-to-r from-blue-600 to-blue-700"
+// Синяя градиентная кнопка
+className="... bg-linear-to-r from-blue-600 to-blue-700"
 // или через <style jsx global> с классом типа .ev-add-btn / .jrn-add-btn
 ```
 
@@ -153,6 +155,9 @@ className="... bg-gradient-to-r from-blue-600 to-blue-700"
 | `/services` | Список сервисов | USER+ |
 | `/services/add` | Добавить сервис | ADMIN+ |
 | `/services/registry` | Реестр сервисов | USER+ |
+| `/services/my-services` | Мои сервисы | USER+ |
+| `/services/my-services/detail` | Детали сервиса (статистика, клиенты, форматы) | USER+ |
+| `/services/my-services/add` | Добавить / редактировать сервис | ADMIN+ |
 | `/incidents` | Инциденты (обзор) | USER+ |
 | `/incidents/events` | Журнал событий (3 режима: работы/инцидент/prtg) | USER+ |
 | `/incidents/add` | Редирект → `/incidents/events` | — |
@@ -161,6 +166,7 @@ className="... bg-gradient-to-r from-blue-600 to-blue-700"
 | `/incidents/add/prtg` | Добавить: Тревоги PRTG | ADMIN+ |
 | `/incidents/statistics` | Статистика инцидентов | USER+ |
 | `/incidents/availability` | Доступность ИС | USER+ |
+| `/statistics/integrations` | Статистика интеграций (E_QUERY_COUNTS + MONGO) | USER+ |
 | `/users` | Список пользователей | USER+ |
 | `/users/register` | Регистрация пользователя | ADMIN+ |
 | `/users/roles` | Роли | USER+ |
@@ -211,7 +217,7 @@ className="... bg-gradient-to-r from-blue-600 to-blue-700"
 2. **Тип работы** (select → `dic_job`)
 3. **Номер письма** (`inMessage`)
 4. **Примечание** (`solution`, col-span-2)
-5. **ИС МТЗСН** (checkboxes)
+5. **ИС** (checkboxes — справочник информационных систем)
 6. **Дата и время** (интервалы, правая колонка)
 
 **Не отображаются** (но остаются в бэкенде со значениями по умолчанию):
@@ -224,7 +230,7 @@ className="... bg-gradient-to-r from-blue-600 to-blue-700"
 1. **Загрузить из тревоги PRTG** (dropdown, вверху)
 2. Тип инцидента, Акт сбоя, Вх. письмо, Исх. письмо, Причина, Примечание
 3. Чекбоксы: Зафиксировано в АО НИТ, Без времени простоя, Учитывать в % доступности
-4. ИС МТЗСН (checkboxes)
+4. ИС (checkboxes — справочник информационных систем)
 5. Дата и время (интервалы, правая колонка)
 
 ### Страницы добавления (3 отдельные страницы)
@@ -262,6 +268,33 @@ frontend/app/incidents/add/
 
 ---
 
+## Статистика интеграций
+
+### Два источника данных (ВАЖНО — только чтение!)
+
+| Таблица | Источник | Назначение |
+|---------|----------|-----------|
+| `e_query_counts` | Oracle `ESERV.E_QUERY_COUNTS` | Статистика запросов по ШЭП (ключ сервиса) |
+| `mongo_inout_stat` | Oracle `ESERV.MONGO_INOUT_STAT` | Статистика по подсистемам и sender_id |
+
+**Oracle-таблицы (`ESERV.*`) — только SELECT. Никогда не изменять!**
+
+### Синхронизация
+- Кнопка "Синхронизировать" на странице `/statistics/integrations`
+- `POST /api/e-query-counts/sync` — UPSERT из Oracle в локальную таблицу
+- `POST /api/mongo-stat/sync` — UPSERT из Oracle в локальную таблицу
+- При синхронизации удалённые в Oracle записи **остаются локально** (не удаляются)
+
+### sender_client_map
+Таблица `sender_client_map` (sender_id → client_name) — маппинг технических ID отправителей на названия организаций-клиентов. Используется в `GET /api/mongo-stat/service/{subsystem}` для отображения клиентских названий.
+
+### Страница детали сервиса (`/services/my-services/detail`)
+- Два графика: статистика запросов по месяцам (max из двух источников) + статистика по клиентам
+- Tooltip показывает значения из обоих источников (E_QUERY_COUNTS и MONGO)
+- Клиенты группируются по `sender_id`, цвет — по названию клиента (`clientName`)
+
+---
+
 ## Backend — стек и API
 
 ### Технологии
@@ -293,8 +326,8 @@ spring.flyway.baseline-on-migrate=true
 ```
 com.example.monitoring/
 ├── config/          SecurityConfig, WebMvcConfig
-├── controller/      12 REST контроллеров
-├── entity/          13 JPA сущностей
+├── controller/      REST контроллеры
+├── entity/          JPA сущности
 ├── dto/             Request/Response DTO
 ├── repository/      Spring Data JPA репозитории
 ├── service/         IncidentService, WorkService, PrtgAlertService, SshMetricsService, ...
@@ -387,6 +420,26 @@ GET    /api/prtg-alert-files/download/{fileId}       → скачать
 DELETE /api/prtg-alert-files/{fileId}                → удалить
 ```
 
+#### Статистика интеграций
+```
+GET    /api/e-query-counts          → список (фильтры: shepServiceId, year)
+POST   /api/e-query-counts/sync     → UPSERT из Oracle
+GET    /api/e-query-counts/service/{key}  → по ключу сервиса, по месяцам
+
+GET    /api/mongo-stat              → список
+POST   /api/mongo-stat/sync         → UPSERT из Oracle
+GET    /api/mongo-stat/service/{subsystem}  → по подсистеме, с clientName из sender_client_map
+```
+
+#### My Services
+```
+GET    /api/my-services             → список
+GET    /api/my-services/{id}
+POST   /api/my-services             → создать (ADMIN+)
+PUT    /api/my-services/{id}        → обновить (ADMIN+)
+DELETE /api/my-services/{id}        → удалить (ADMIN+)
+```
+
 #### Servers
 ```
 GET    /api/servers
@@ -409,7 +462,7 @@ DELETE /api/settings/certificates/{id}
 ```
 /api/environments          → Окружения (DicEnv)
 /api/government-bodies     → Гос. органы (DicGo)
-/api/information-systems   → ИС МТЗСН (DicIs, FK → DicGo)
+/api/information-systems   → Информационные системы (DicIs, FK → DicGo)
 /api/locations             → Местоположения (DicLocation)
 /api/job-types             → Типы работ (DicJob) — только GET
 /api/dic-failure-types     → Типы инцидентов — только GET
@@ -438,8 +491,6 @@ if (dateFrom != null || dateTo != null) {
 }
 ```
 
-Год-чипы в UI также извлекаются из дат интервалов (через `findDistinctYears()` в репозиториях).
-
 ### IncidentStatsResponse
 
 Используется страницами `/incidents/statistics` и `/incidents/availability`:
@@ -462,57 +513,9 @@ IncidentStatsResponse {
 | `=== АКТУАЛЬНЫЕ ДАННЫЕ ИЗ СИСТЕМЫ ===` | `IncidentService.stats()` и `SshMetricsService` | по ключевым словам в вопросе |
 
 **Чтобы ассистент узнал что-то новое о сайте — правится только `backend/src/main/resources/ai/knowledge.md`, код трогать не нужно.**
-Формат: раздел `## Заголовок`, следом строка `keywords: осн1, осн2` (основы слов, чтобы
-совпадали падежи), дальше текст. `KnowledgeBaseService` подбирает раздел «О системе»
-плюс до 3 наиболее подходящих разделов, суммарно не более 4000 символов.
+Формат: раздел `## Заголовок`, следом строка `keywords: осн1, осн2`, дальше текст.
 
-Ключевые слова — обычный `contains` по подстроке, поэтому короткие основы опасны:
-«роль» ловится внутри «пароль», «бот» — внутри «работы». Проверяй новые ключи на
-соседних темах.
-
-В `knowledge.md` НЕЛЬЗЯ класть пароли, секреты и внутренние адреса — файл целиком
-уходит в промпт модели.
-
----
-
-## Что было сделано в предыдущих сессиях
-
-### Редизайн страниц
-1. **`/login`** — одноколоночный дизайн с анимированным фоном, glassmorphism карточка, градиентная кнопка, shake-анимация при ошибке. Футер убран.
-2. **`/incidents/add`** — двухколоночный layout (grid-cols-5: 3/5 + 2/5), вмещается на один экран без скролла
-3. **`/incidents/events`** — минималистичный журнал: chip-кнопки для года/квартала, чередующиеся строки, модальное окно с анимацией
-
-### Удалено "Местоположение"
-- Убрано из UI в `/incidents/add` и `/incidents/events`
-- В интерфейсах TypeScript `locationId`/`locationNameRu` остались (данные с бэка), но не отображаются
-
-### Разделение страниц добавления
-- Созданы 3 страницы: `/incidents/add/works`, `/incidents/add/incident`, `/incidents/add/prtg`
-- Общий компонент: `frontend/app/incidents/add/add-incident-form.tsx`
-- `/incidents/add` — редирект на `/incidents/events`
-- Sidebar: пункт "Новое событие" удалён, добавление только через кнопку в журнале
-
-### 3-табличная архитектура (works / incidents / prtg_alerts)
-- Каждый тип события хранится в отдельной таблице
-- Тревоги PRTG — внутренние записи, видны только ADMIN+
-- Из тревоги PRTG можно создать работу или инцидент ("Загрузить из тревоги PRTG"), поле `sourcePrtgId` ссылается на источник
-- Кнопка загрузки из PRTG расположена **вверху** форм (works и incident)
-
-### Упрощение формы "Работы"
-- Убраны поля: Исх. письмо, Без времени простоя, Учитывать в % доступности
-- Форма содержит только: PRTG loader, Тип работы, Номер письма, Примечание, ИС МТЗСН, Интервалы
-
-### Фильтрация по дате через интервалы
-- Все три сервиса фильтруют по `intervals.dateFrom` (не `created_at`)
-- Год-чипы в events/page.tsx используют mode-специфичные endpoints `/years`
-- `PrtgAlertController.list()` принимает `dateFrom`/`dateTo` параметры
-
-### Новые API endpoints
-- `GET /api/works/years`
-- `GET /api/prtg-alerts/years`
-- `GET /api/incidents/stats`
-- `GET /api/works/load-from-prtg/{id}`
-- `GET /api/incidents/load-from-prtg/{id}`
+В `knowledge.md` НЕЛЬЗЯ класть пароли, секреты и внутренние адреса.
 
 ---
 
@@ -520,7 +523,7 @@ IncidentStatsResponse {
 
 > Проверяй этот раздел в начале сессии!
 
-Нет незавершённых задач. Нужно пересобрать JAR (`mvn clean package`) и задеплоить на прод.
+Нет незавершённых задач.
 
 ---
 
@@ -528,13 +531,13 @@ IncidentStatsResponse {
 
 ### Tailwind v4 классы
 ```
-❌ w-[72px], h-[18px], max-w-[420px], flex-shrink-0
-✅ w-18,     h-4.5,    max-w-105,     shrink-0
+❌ w-[72px], h-[18px], max-w-[420px], flex-shrink-0, bg-gradient-to-r
+✅ w-18,     h-4.5,    max-w-105,     shrink-0,      bg-linear-to-r
 ```
 
 ### Select в dark mode
 ```typescript
-// ❌ Проблема: text не виден (белый на белом или наоборот)
+// ❌ Проблема: text не виден
 dark:bg-white/5 dark:text-slate-200
 
 // ✅ Решение: конкретные цвета
@@ -564,21 +567,24 @@ export default function Page() {
 
 ### Flyway — "схема для создания объектов не выбрана"
 ```properties
-# Обязательно добавить в application.properties:
 spring.flyway.schemas=public
 spring.flyway.default-schema=public
 spring.flyway.baseline-on-migrate=true
 ```
 
 ### Flyway — дублирующиеся версии при пересборке
-Старые `.sql` файлы остаются в `target/classes/db/migration` после предыдущих сборок.
-Всегда использовать `mvn clean package` (не просто `mvn package`).
+Старые `.sql` файлы остаются в `target/classes/db/migration`. Всегда использовать `mvnw.cmd clean package`.
 
 ### JPA Specification с JOIN по коллекции
-Если join идёт по OneToMany (коллекция), обязательно добавить `query.distinct(true)`, иначе дубли строк.
+Если join идёт по OneToMany, обязательно добавить `query.distinct(true)`, иначе дубли строк.
 
-### Write tool не применил изменения
-Если `Write` вернул успех, но файл не обновился — сделай `Read` для проверки и повтори `Write`.
+### UPSERT в mongo_inout_stat
+Уникальный индекс создан с `COALESCE`: `(subsystem, COALESCE(sender_id, ''), stat_year, stat_month)`.
+`ON CONFLICT` в SQL должен использовать ту же формулу:
+```sql
+ON CONFLICT (subsystem, COALESCE(sender_id, ''), stat_year, stat_month)
+DO UPDATE SET cnt = EXCLUDED.cnt, synced_at = EXCLUDED.synced_at
+```
 
 ---
 
