@@ -1,0 +1,18 @@
+# Игнорировать всё в корне кроме нужного
+/*
+!CLAUDE.md
+!backend/
+!frontend/
+!.gitignore
+
+# Backend — не пушить скомпилированное
+backend/target/
+backend/uploads/
+
+# Frontend — не пушить зависимости и сборку
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/out.zip
+frontend/tsconfig.tsbuildinfo
+frontend/desktop.ini
